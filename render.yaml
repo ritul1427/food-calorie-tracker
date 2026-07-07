@@ -1,25 +1,15 @@
 services:
-  # Python backend API
   - type: web
     name: food-calorie-api
     env: python
-    plan: free
-    rootDir: .
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
-    healthCheckPath: /
+    healthCheckPath: /health
 
-  # Static frontend
   - type: web
     name: food-calorie-web
-    env: static
-    plan: free
-    rootDir: .
+    runtime: static
     buildCommand: ""
     staticPublishPath: .
     autoDeploy: true
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html

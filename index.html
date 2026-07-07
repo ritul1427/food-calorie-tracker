@@ -1,189 +1,71 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Calorie & Nutrient Tracker</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--line:#1f2937}
-    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:linear-gradient(160deg,#020617,#0f172a);color:var(--text)}
-    .wrap{width:min(1100px,95%);margin:24px auto 60px}.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px}
-    .card{background:rgba(17,24,39,.9);border:1px solid var(--line);border-radius:14px;padding:16px}
-    .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-    input,button{border-radius:10px;padding:10px 12px} input{background:#0b1220;color:#e5e7eb;border:1px solid #334155}
-    button{border:1px solid #14532d;background:#22c55e;color:#03120a;font-weight:700;cursor:pointer}
-    button.secondary{background:#0b1220;color:#e5e7eb;border:1px solid #334155}
-    .preview{margin-top:12px;width:100%;max-height:280px;object-fit:contain;border:1px dashed #334155;border-radius:12px;background:#020617}
-    .table-wrap{overflow:auto;margin-top:10px} table{width:100%;border-collapse:collapse;min-width:760px} th,td{border-bottom:1px solid #243041;padding:9px 8px;text-align:left}
-    .kpis{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin-top:12px}.kpi{border:1px solid #253245;border-radius:12px;padding:10px;background:#0a1220}
-    .two{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}.meal-list{margin-top:10px;max-height:260px;overflow:auto;border:1px solid #223044;border-radius:10px}
-    .meal-item{display:flex;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #1f2a3a}
-    @media (max-width:940px){.grid,.two{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>🍽️ Calorie & Nutrient Tracker</h1>
-    <p>Upload meal photo → analyze → edit → log → daily summary charts</p>
-
-    <div class="grid">
-      <section class="card">
-        <h2>Upload & Analyze Meal</h2>
-        <div class="controls">
-          <input id="mealPhoto" type="file" accept="image/*" />
-          <button id="analyzeBtn">Analyze Meal</button>
-          <span id="analysisBadge">Not analyzed</span>
-        </div>
-        <img id="preview" class="preview" alt="meal preview" style="display:none;" />
-        <div id="status">No image selected.</div>
-
-        <div id="resultArea" style="display:none;">
-          <div class="table-wrap">
-            <table id="itemsTable">
-              <thead><tr><th>Food Item</th><th>Qty (g)</th><th>Calories</th><th>Protein</th><th>Carbs</th><th>Fat</th><th>Fiber</th><th>Sugar</th><th>Sodium</th><th>Confidence</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-          <div class="controls" style="margin-top:10px;">
-            <button id="recalcBtn" class="secondary">Recalculate After Edits</button>
-            <button id="logMealBtn">Log This Meal</button>
-          </div>
-          <div class="kpis" id="mealTotals"></div>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Daily Summary & Logs</h2>
-        <div class="controls">
-          <input id="summaryDate" type="date" />
-          <button id="refreshBtn" class="secondary">Refresh</button>
-        </div>
-        <div class="kpis" id="dayTotals"></div>
-        <div class="two">
-          <div class="card" style="padding:10px;"><h3>Calories per Meal</h3><canvas id="calorieChart" height="180"></canvas></div>
-          <div class="card" style="padding:10px;"><h3>Macro Distribution</h3><canvas id="macroChart" height="180"></canvas></div>
-        </div>
-        <h3>Meal Log</h3>
-        <div id="mealList" class="meal-list"></div>
-      </section>
-    </div>
-  </div>
-
 <script>
-(() => {
-  const API_BASE_URL = "https://food-calorie-api-zamp.onrender.com"; // change after backend deploy
-  const STORAGE_KEY = 'meal_logs_v1';
-  let currentAnalysis = null;
-  let calorieChart = null, macroChart = null;
+  analyzeBtn.addEventListener('click', async () => {
+    const file = mealPhoto.files?.[0];
+    if (!file) {
+      alert('Please upload image');
+      return;
+    }
 
-  const mealPhoto = document.getElementById('mealPhoto');
-  const analyzeBtn = document.getElementById('analyzeBtn');
-  const preview = document.getElementById('preview');
-  const statusEl = document.getElementById('status');
-  const analysisBadge = document.getElementById('analysisBadge');
-  const resultArea = document.getElementById('resultArea');
-  const itemsTableBody = document.querySelector('#itemsTable tbody');
-  const recalcBtn = document.getElementById('recalcBtn');
-  const logMealBtn = document.getElementById('logMealBtn');
-  const summaryDate = document.getElementById('summaryDate');
-  const refreshBtn = document.getElementById('refreshBtn');
-  const mealTotals = document.getElementById('mealTotals');
-  const dayTotals = document.getElementById('dayTotals');
-  const mealList = document.getElementById('mealList');
+    statusEl.textContent = 'Analyzing...';
+    analysisBadge.textContent = 'Analyzing...';
+    analyzeBtn.disabled = true;
 
-  const todayStr = () => new Date().toISOString().slice(0,10);
-  const nowTime = () => new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  const round = (n,d=1)=>Number(n.toFixed(d));
-  const uuid = () => Math.random().toString(36).slice(2,10);
-  const loadLogs = () => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-  const saveLogs = (logs) => localStorage.setItem(STORAGE_KEY, JSON.stringify(logs));
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
 
-  function sumItems(items){
-    const t={calories:0,protein:0,carbs:0,fat:0,fiber:0,sugar:0,sodium:0};
-    items.forEach(i=>Object.keys(t).forEach(k=>t[k]+=Number(i[k]||0)));
-    Object.keys(t).forEach(k=>t[k]=round(t[k],1));
-    return t;
-  }
+      // Abort request if backend is cold/stuck too long
+      const controller = new AbortController();
+      const timeoutMs = 45000; // 45 seconds
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  function renderAnalysisTable(items){
-    itemsTableBody.innerHTML='';
-    items.forEach(item=>{
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td><input type="text" value="${item.name}" data-id="${item.id}" data-field="name" style="width:140px" /></td>
-      <td><input type="number" min="1" value="${item.qty_g}" data-id="${item.id}" data-field="qty_g" style="width:90px" /></td>
-      <td>${item.calories}</td><td>${item.protein}</td><td>${item.carbs}</td><td>${item.fat}</td><td>${item.fiber}</td><td>${item.sugar}</td><td>${item.sodium}</td><td>${Math.round(item.confidence*100)}%</td>`;
-      itemsTableBody.appendChild(tr);
-    });
-    itemsTableBody.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',(e)=>{
-      const item=currentAnalysis.items.find(x=>x.id===e.target.dataset.id); if(!item)return;
-      if(e.target.dataset.field==='name') item.name=(e.target.value||'').trim().toLowerCase();
-      if(e.target.dataset.field==='qty_g') item.qty_g=Math.max(1, Number(e.target.value||1));
-    }));
-  }
+      let res;
+      try {
+        res = await fetch(`${API_BASE_URL}/analyze`, {
+          method: 'POST',
+          body: fd,
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
-  function renderMealTotals(t,c){
-    mealTotals.innerHTML=`
-      <div class="kpi"><div>Total Calories</div><strong>${t.calories} kcal</strong></div>
-      <div class="kpi"><div>Protein</div><strong>${t.protein} g</strong></div>
-      <div class="kpi"><div>Carbs</div><strong>${t.carbs} g</strong></div>
-      <div class="kpi"><div>Fat</div><strong>${t.fat} g</strong></div>
-      <div class="kpi"><div>Fiber</div><strong>${t.fiber} g</strong></div>
-      <div class="kpi"><div>Sugar</div><strong>${t.sugar} g</strong></div>
-      <div class="kpi"><div>Sodium</div><strong>${t.sodium} mg</strong></div>
-      <div class="kpi"><div>Confidence</div><strong>${Math.round(c*100)}%</strong></div>`;
-  }
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Analyze failed: ${res.status} ${errText}`);
+      }
 
-  function renderDaySummary(dateStr){
-    const logs=loadLogs().filter(m=>m.date===dateStr);
-    const totals=logs.reduce((a,m)=>{Object.keys(a).forEach(k=>a[k]+=m.totals[k]||0);return a;},{calories:0,protein:0,carbs:0,fat:0,fiber:0,sugar:0,sodium:0});
-    Object.keys(totals).forEach(k=>totals[k]=round(totals[k],1));
-    dayTotals.innerHTML=`<div class="kpi"><div>Meals</div><strong>${logs.length}</strong></div><div class="kpi"><div>Calories</div><strong>${totals.calories}</strong></div><div class="kpi"><div>Protein</div><strong>${totals.protein}</strong></div><div class="kpi"><div>Carbs</div><strong>${totals.carbs}</strong></div><div class="kpi"><div>Fat</div><strong>${totals.fat}</strong></div><div class="kpi"><div>Fiber</div><strong>${totals.fiber}</strong></div><div class="kpi"><div>Sugar</div><strong>${totals.sugar}</strong></div><div class="kpi"><div>Sodium</div><strong>${totals.sodium}</strong></div>`;
-    mealList.innerHTML=logs.length?logs.map(m=>`<div class="meal-item"><div><strong>${m.time}</strong> • ${m.items.map(i=>i.name).join(', ')}</div><div><strong>${m.totals.calories} kcal</strong></div></div>`).join(''):`<div class="meal-item">No meals logged.</div>`;
+      const data = await res.json();
 
-    const labels=logs.map(m=>m.time), kcal=logs.map(m=>m.totals.calories);
-    if(calorieChart) calorieChart.destroy();
-    calorieChart=new Chart(document.getElementById('calorieChart'),{type:'bar',data:{labels,datasets:[{data:kcal,label:'Calories'}]},options:{plugins:{legend:{display:false}}}});
-    const mt=logs.reduce((a,m)=>({protein:a.protein+m.totals.protein,carbs:a.carbs+m.totals.carbs,fat:a.fat+m.totals.fat}),{protein:0,carbs:0,fat:0});
-    if(macroChart) macroChart.destroy();
-    macroChart=new Chart(document.getElementById('macroChart'),{type:'doughnut',data:{labels:['Protein','Carbs','Fat'],datasets:[{data:[round(mt.protein,1),round(mt.carbs,1),round(mt.fat,1)]}]}});
-  }
+      currentAnalysis = {
+        fileName: file.name,
+        items: data.items.map((it, idx) => ({
+          id: (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${idx}`,
+          ...it
+        })),
+        totals: data.totals,
+        meanConfidence: data.mean_confidence
+      };
 
-  mealPhoto.addEventListener('change',(e)=>{
-    const file=e.target.files?.[0]; if(!file){preview.style.display='none';return;}
-    const r=new FileReader(); r.onload=ev=>{preview.src=ev.target.result;preview.style.display='block'}; r.readAsDataURL(file);
-    statusEl.textContent=`Selected: ${file.name}`;
+      renderAnalysisTable(currentAnalysis.items);
+      renderMealTotals(currentAnalysis.totals, currentAnalysis.meanConfidence);
+      resultArea.style.display = 'block';
+      statusEl.textContent = 'Analysis complete';
+      analysisBadge.textContent = `Done (${Math.round(currentAnalysis.meanConfidence * 100)}%)`;
+    } catch (err) {
+      console.error(err);
+
+      if (err.name === 'AbortError') {
+        statusEl.textContent = 'Request timed out (free-tier cold start). Please try again.';
+        analysisBadge.textContent = 'Timeout';
+        alert('Analyze timed out. Wait 30–60s and try again.');
+      } else {
+        statusEl.textContent = `Analysis failed: ${err.message}`;
+        analysisBadge.textContent = 'Failed';
+        alert(`Analysis failed: ${err.message}`);
+      }
+    } finally {
+      analyzeBtn.disabled = false; // always reset button
+    }
   });
-
-  analyzeBtn.addEventListener('click', async ()=>{
-    const file=mealPhoto.files?.[0]; if(!file){alert('Please upload image');return;}
-    statusEl.textContent='Analyzing...'; analyzeBtn.disabled=true;
-    try{
-      const fd=new FormData(); fd.append('file', file);
-      const res=await fetch(`${API_BASE_URL}/analyze`,{method:'POST',body:fd});
-      if(!res.ok) throw new Error(`Analyze failed: ${res.status}`);
-      const data=await res.json();
-      currentAnalysis={fileName:file.name,items:data.items.map((it,idx)=>({id:crypto?.randomUUID?.()||`${Date.now()}_${idx}`,...it})),totals:data.totals,meanConfidence:data.mean_confidence};
-      renderAnalysisTable(currentAnalysis.items); renderMealTotals(currentAnalysis.totals,currentAnalysis.meanConfidence); resultArea.style.display='block';
-      statusEl.textContent='Analysis complete'; analysisBadge.textContent=`Done (${Math.round(currentAnalysis.meanConfidence*100)}%)`;
-    }catch(err){console.error(err);statusEl.textContent='Analysis failed. Check backend URL and deployment.';alert('Analysis failed.');}
-    finally{analyzeBtn.disabled=false;}
-  });
-
-  recalcBtn.addEventListener('click', ()=>{
-    if(!currentAnalysis) return;
-    currentAnalysis.totals=sumItems(currentAnalysis.items); renderMealTotals(currentAnalysis.totals,currentAnalysis.meanConfidence);
-  });
-
-  logMealBtn.addEventListener('click', ()=>{
-    if(!currentAnalysis) return alert('No analysis yet');
-    const logs=loadLogs(); logs.push({id:uuid(),date:summaryDate.value||todayStr(),time:nowTime(),items:currentAnalysis.items,totals:currentAnalysis.totals,meanConfidence:currentAnalysis.meanConfidence});
-    saveLogs(logs); renderDaySummary(summaryDate.value||todayStr()); statusEl.textContent='Meal logged';
-  });
-
-  refreshBtn.addEventListener('click', ()=>renderDaySummary(summaryDate.value||todayStr()));
-  summaryDate.value=todayStr(); renderDaySummary(summaryDate.value);
-})();
 </script>
-</body>
-</html>

@@ -1,1 +1,12 @@
+services:
+  - type: web
+    name: food-calorie-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
 
+  - type: static
+    name: food-calorie-web
+    buildCommand: ""
+    staticPublishPath: .
